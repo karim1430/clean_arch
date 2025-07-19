@@ -1,3 +1,4 @@
+import 'dart:developer';
 import 'package:bookly_app/Features/home/domain/entities/book_entity.dart';
 import 'package:bookly_app/Features/search/presentation/managers/search_book/search_books_cubit.dart';
 import 'package:flutter/material.dart';
@@ -14,22 +15,41 @@ class SearchResultListView extends StatefulWidget {
 
 class _SearchResultListViewState extends State<SearchResultListView> {
   @override
-  void initState() {
-    BlocProvider.of<SearchBooksCubit>(context)
-        .fetchSearchBooks(category: widget.search, pageNumber: 0);
-    super.initState();
+  void didUpdateWidget(covariant SearchResultListView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.search != widget.search) {
+      setState(() {
+        BlocProvider.of<SearchBooksCubit>(context)
+            .fetchSearchBooks(category: widget.search, pageNumber: 0);
+      });
+    }
   }
 
+  List<BookEntity> books = [];
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<SearchBooksCubit, SearchBooksState>(
       listener: (context, state) {
-        // TODO: implement listener
+        if (state is SearchBooksSuccess) {
+          books.addAll(state.books);
+        }
+        if (state is SearchBooksPaginationFailure) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                state.errMessage,
+                style: const TextStyle(color: Colors.white),
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       },
       builder: (context, state) {
         if (state is SearchBooksSuccess) {
           return SearchResultListViewBlocConsumer(
-            books: state.books,
+            books: books,
+            search: widget.search,
           );
         } else if (state is SearchBooksFailure) {
           return Center(
@@ -45,23 +65,77 @@ class _SearchResultListViewState extends State<SearchResultListView> {
   }
 }
 
-class SearchResultListViewBlocConsumer extends StatelessWidget {
+class SearchResultListViewBlocConsumer extends StatefulWidget {
   const SearchResultListViewBlocConsumer({
     super.key,
     required this.books,
+    required this.search,
   });
   final List<BookEntity> books;
+  final String search;
+
+  @override
+  State<SearchResultListViewBlocConsumer> createState() =>
+      _SearchResultListViewBlocConsumerState();
+}
+
+class _SearchResultListViewBlocConsumerState
+    extends State<SearchResultListViewBlocConsumer> {
+  late ScrollController scrollController;
+  int nextPage = 1;
+  bool isloading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    scrollController = ScrollController();
+    scrollController.addListener(_listenerToScroll);
+  }
+
+  void _listenerToScroll() {
+    var currntPosition = scrollController.position.pixels;
+    var maxScrollLenth = scrollController.position.maxScrollExtent;
+    if (currntPosition >= 0.7 * maxScrollLenth) {
+      if (!isloading) {
+        isloading = true;
+        BlocProvider.of<SearchBooksCubit>(context)
+            .fetchSearchBooks(category: widget.search, pageNumber: nextPage);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    scrollController.removeListener(_listenerToScroll);
+    scrollController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
+    return BlocListener<SearchBooksCubit, SearchBooksState>(
+      listener: (context, state) {
+        if (state is SearchBooksSuccess) {
+          nextPage++;
+          isloading = false;
+        } else if (state is SearchBooksPaginationFailure ||
+            state is SearchBooksFailure) {
+          isloading = false;
+        } else if (state is SearchBooksPaginationLoading) {
+          isloading = true;
+        }
+      },
+      child: ListView.builder(
+        controller: scrollController,
         shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
         padding: EdgeInsets.zero,
-        itemCount: books.length,
+        itemCount: widget.books.length,
         itemBuilder: (context, index) {
           return BookListViewItem(
-            book: books[index],
+            book: widget.books[index],
           );
-        });
+        },
+      ),
+    );
   }
 }
